@@ -54,6 +54,11 @@ export function validateBinaryIdentity(output, version, target) {
   return undefined;
 }
 
+export function licenseTextMatches(checkedIn, installed) {
+  const normalizeLineEndings = (text) => text.toString('utf8').replace(/\r\n/g, '\n');
+  return normalizeLineEndings(checkedIn) === normalizeLineEndings(installed);
+}
+
 export function requiredVsixFiles(binaryName, notices) {
   const licenses = Array.from(
     notices.matchAll(/\((third_party\/licenses\/[^)]+)\)/g),

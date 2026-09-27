@@ -4,7 +4,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSy
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildPublicCompiler, parseCompilerLock } from './publicCompiler.mjs';
-import { compilerBinaryFromArgs, platformTarget, requiredVsixFiles, validateBinaryIdentity, validateBundledPackages, validateNotices, vscePackageArgs } from './packageCore.mjs';
+import { compilerBinaryFromArgs, licenseTextMatches, platformTarget, requiredVsixFiles, validateBinaryIdentity, validateBundledPackages, validateNotices, vscePackageArgs } from './packageCore.mjs';
 
 const extensionRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageJson = JSON.parse(readFileSync(resolve(extensionRoot, 'package.json'), 'utf8'));
@@ -70,7 +70,7 @@ for (const packages of Object.values(installedLicenses)) {
       const sourceFiles = readdirSync(sourceDirectory).filter((file) => /^licen[cs]e(?:\..*)?$/i.test(file));
       if (sourceFiles.length === 0) throw new Error('Cannot find original license file for ' + pkg.name + '@' + version + '.');
       const bundledLicense = readFileSync(resolve(extensionRoot, 'third_party/licenses', pkg.name + '-' + version + '.txt'));
-      if (!sourceFiles.some((file) => bundledLicense.equals(readFileSync(resolve(sourceDirectory, file))))) {
+      if (!sourceFiles.some((file) => licenseTextMatches(bundledLicense, readFileSync(resolve(sourceDirectory, file))))) {
         throw new Error('Bundled license text differs from installed ' + pkg.name + '@' + version + '.');
       }
     }

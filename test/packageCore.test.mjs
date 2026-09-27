@@ -6,7 +6,12 @@ import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compilerBuildEnvironment, parseCompilerLock, parseLockedCompilerRevision } from '../scripts/publicCompiler.mjs';
-import { compilerBinaryFromArgs, platformTarget, requiredVsixFiles, validateBinaryIdentity, validateBundledPackages, validateNotices, vscePackageArgs } from '../scripts/packageCore.mjs';
+import { compilerBinaryFromArgs, licenseTextMatches, platformTarget, requiredVsixFiles, validateBinaryIdentity, validateBundledPackages, validateNotices, vscePackageArgs } from '../scripts/packageCore.mjs';
+
+test('license comparison accepts checkout line endings but rejects changed text', () => {
+  assert.equal(licenseTextMatches(Buffer.from('Line one\nLine two\n'), Buffer.from('Line one\r\nLine two\r\n')), true);
+  assert.equal(licenseTextMatches(Buffer.from('Line one\nLine two\n'), Buffer.from('Line one\nLine three\n')), false);
+});
 
 test('platform targets cover the six release hosts', () => {
   assert.equal(platformTarget('darwin', 'arm64'), 'darwin-arm64');
