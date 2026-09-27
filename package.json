@@ -1,0 +1,85 @@
+{
+  "name": "calckernel-vscode-plugin",
+  "displayName": "CalcKernel",
+  "description": "CK / CalcKernel language support for Visual Studio Code.",
+  "version": "0.15.0-dev.0",
+  "publisher": "Luxine",
+  "license": "MIT",
+  "homepage": "https://calckernel.org",
+  "bugs": {
+    "url": "https://github.com/luxine/CalcKernel-VSCode/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luxine/CalcKernel-VSCode.git"
+  },
+  "packageManager": "pnpm@11.7.0",
+  "engines": { "vscode": "^1.91.0" },
+  "extensionKind": ["workspace"],
+  "capabilities": {
+    "virtualWorkspaces": {
+      "supported": "limited",
+      "description": "Syntax highlighting and snippets work in virtual workspaces. CK language server and compiler commands require local file-backed documents."
+    }
+  },
+  "activationEvents": ["onLanguage:calckernel"],
+  "main": "./dist/extension.cjs",
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [{
+      "id": "calckernel",
+      "aliases": ["CalcKernel", "CK"],
+      "extensions": [".ck"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "calckernel",
+      "scopeName": "source.calckernel",
+      "path": "./syntaxes/calckernel.tmLanguage.json"
+    }],
+    "snippets": [{ "language": "calckernel", "path": "./snippets/calckernel.json" }],
+    "configuration": {
+      "title": "CalcKernel",
+      "properties": {
+        "ck.server.path": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the ckc executable used for CK language features. Empty uses the bundled server, then PATH."
+        },
+        "ck.compiler.path": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to a Native-enabled ckc executable for Run and Build. Empty uses PATH."
+        }
+      }
+    },
+    "commands": [
+      { "command": "ck.check", "title": "CK: Check Current File" },
+      { "command": "ck.run", "title": "CK: Run Current File" },
+      { "command": "ck.build", "title": "CK: Build Current File" },
+      { "command": "ck.restartServer", "title": "CK: Restart Language Server" },
+      { "command": "ck.showOutput", "title": "CK: Show Output" }
+    ]
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs && vitest run",
+    "test:integration": "pnpm build && node test/runIntegration.mjs",
+    "test:vsix": "node test/runIntegration.mjs --vsix",
+    "typecheck": "tsc -p . --noEmit",
+    "build": "pnpm typecheck && node esbuild.mjs",
+    "vscode:prepublish": "pnpm build",
+    "package": "pnpm build && node scripts/package.mjs"
+  },
+  "dependencies": {
+    "vscode-languageclient": "10.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.0",
+    "@types/vscode": "1.91.0",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.0.0",
+    "esbuild": "0.25.0",
+    "typescript": "5.9.3",
+    "vitest": "3.2.0"
+  }
+}

@@ -1,0 +1,269 @@
+name: VS Code extension
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      publish_marketplace:
+        description: Retry Marketplace publication from an existing tag release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vscode-extension-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    if: github.event_name != 'workflow_dispatch' || inputs.publish_marketplace != true
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-15
+            executable: target/release/ckc
+          - target: darwin-x64
+            runner: macos-15-intel
+            executable: target/release/ckc
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            executable: target/release/ckc
+          - target: linux-x64
+            runner: ubuntu-24.04
+            executable: target/release/ckc
+          - target: win32-arm64
+            runner: windows-11-arm
+            executable: target/release/ckc.exe
+          - target: win32-x64
+            runner: windows-2025
+            executable: target/release/ckc.exe
+    env:
+      CK_VSCODE_CKC_BINARY: ${{ github.workspace }}/CalcKernel/${{ matrix.executable }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.16.0
+
+      - name: Validate pinned public compiler revision
+        id: compiler-revision
+        shell: bash
+        run: |
+          revision="$(node -p "require('./compiler.lock.json').commit")"
+          if ! [[ "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "compiler.lock.json must contain a full public CalcKernel commit SHA" >&2
+            exit 1
+          fi
+          echo "sha=$revision" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: luxine/CalcKernel
+          ref: ${{ steps.compiler-revision.outputs.sha }}
+          path: CalcKernel
+
+      - name: Validate tag and extension version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [[ "$tag_version" != "$version" ]]; then
+            echo "Release tag v$tag_version does not match package version $version" >&2
+            exit 1
+          fi
+
+      - name: Activate the pinned pnpm version
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.7.0 --activate
+          pnpm --version
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.90.0
+
+      - name: Build pinned public compiler
+        working-directory: CalcKernel
+        run: cargo build --release --locked --bin ckc
+        env:
+          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
+
+      - name: Test CK workspace paths and symbols
+        working-directory: CalcKernel
+        run: cargo test --locked --bin ckc cli::lsp::workspace::tests
+
+      - name: Install extension dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test, typecheck, build, and package
+        run: |
+          pnpm test
+          pnpm typecheck
+          pnpm build
+          pnpm package
+
+      - name: Test packaged extension in VS Code
+        if: matrix.target == 'linux-x64'
+        run: xvfb-run -a pnpm test:vsix
+        env:
+          CK_VSCODE_TEST_CKC: ${{ github.workspace }}/CalcKernel/target/release/ckc
+
+      - name: Test extension client and server in VS Code
+        if: matrix.target == 'linux-x64'
+        run: xvfb-run -a pnpm test:integration
+        env:
+          CK_VSCODE_TEST_CKC: ${{ github.workspace }}/CalcKernel/target/release/ckc
+
+      - name: Upload VSIX
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vsix-${{ matrix.target }}
+          path: out/*.vsix
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: vsix-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "A GitHub Release already exists for $GITHUB_REF_NAME; refusing to replace it." >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            gh release create "$GITHUB_REF_NAME" dist/*.vsix --generate-notes --prerelease --verify-tag
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.vsix --generate-notes --verify-tag
+          fi
+
+  marketplace:
+    if: >-
+      always() &&
+      startsWith(github.ref, 'refs/tags/') &&
+      ((github.event_name == 'push' && needs.build.result == 'success') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_marketplace))
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check Marketplace credentials
+        id: credentials
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [[ -z "$VSCE_PAT" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "VSCE_PAT is not configured; Marketplace publication is skipped."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Require credentials for a requested retry
+        if: steps.credentials.outputs.enabled != 'true' && github.event_name == 'workflow_dispatch'
+        run: |
+          echo "Set the repository secret VSCE_PAT before retrying Marketplace publication." >&2
+          exit 1
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: steps.credentials.outputs.enabled == 'true'
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: steps.credentials.outputs.enabled == 'true'
+        with:
+          node-version: 22.16.0
+
+      - name: Activate pnpm
+        if: steps.credentials.outputs.enabled == 'true'
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.7.0 --activate
+
+      - name: Install publisher tooling
+        if: steps.credentials.outputs.enabled == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Download packages from this tag build
+        if: steps.credentials.outputs.enabled == 'true' && github.event_name == 'push'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: vsix-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download packages from the existing GitHub Release
+        if: steps.credentials.outputs.enabled == 'true' && github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null
+          mkdir -p dist
+          gh release download "$GITHUB_REF_NAME" --pattern '*.vsix' --dir dist
+
+      - name: Verify all six platform packages are available
+        if: steps.credentials.outputs.enabled == 'true'
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          for target in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-arm64 win32-x64; do
+            file="dist/calckernel-vscode-plugin-${version}-${target}.vsix"
+            if [[ ! -f "$file" ]]; then
+              echo "Missing VSIX for $target: $file" >&2
+              exit 1
+            fi
+          done
+
+      - name: Publish packages to Visual Studio Marketplace
+        if: steps.credentials.outputs.enabled == 'true'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          for target in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-arm64 win32-x64; do
+            vsix="dist/calckernel-vscode-plugin-${GITHUB_REF_NAME#v}-${target}.vsix"
+            if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+              if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then
+                pnpm exec vsce publish --packagePath "$vsix" --pre-release --skip-duplicate
+              else
+                pnpm exec vsce publish --packagePath "$vsix" --pre-release
+              fi
+            elif [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then
+              pnpm exec vsce publish --packagePath "$vsix" --skip-duplicate
+            else
+              pnpm exec vsce publish --packagePath "$vsix"
+            fi
+          done

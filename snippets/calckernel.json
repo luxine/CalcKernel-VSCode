@@ -1,0 +1,139 @@
+{
+  "Struct": {
+    "prefix": "struct",
+    "body": [
+      "struct ${1:Name} {",
+      "  ${2:field}: ${3:i64};",
+      "}"
+    ],
+    "description": "Define a CalcKernel struct"
+  },
+  "Function": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:name}(${2:param}: ${3:i64}) -> ${4:i64} {",
+      "  return ${2:param};",
+      "}"
+    ],
+    "description": "Define an internal CalcKernel function"
+  },
+  "Export Function": {
+    "prefix": "export fn",
+    "body": [
+      "export fn ${1:name}(${2:param}: ${3:i64}) -> ${4:i64} {",
+      "  return ${2:param};",
+      "}"
+    ],
+    "description": "Define an exported CalcKernel function"
+  },
+  "Let Binding": {
+    "prefix": "let",
+    "body": [
+      "let ${1:name}: ${2:i64} = ${3:0};"
+    ],
+    "description": "Create a typed let binding"
+  },
+  "F64 Let Binding": {
+    "prefix": "letf64",
+    "body": [
+      "let ${1:name}: f64 = ${2:0.0};"
+    ],
+    "description": "Create an f64 let binding"
+  },
+  "I32 To F64": {
+    "prefix": "i32tof64",
+    "body": [
+      "i32_to_f64(${1:value})"
+    ],
+    "description": "Convert an i32 value to f64"
+  },
+  "U32 To F64": {
+    "prefix": "u32tof64",
+    "body": [
+      "u32_to_f64(${1:value})"
+    ],
+    "description": "Convert a u32 value to f64"
+  },
+  "If Statement": {
+    "prefix": "if",
+    "body": [
+      "if ${1:condition} {",
+      "  ${2:return 0;}",
+      "}"
+    ],
+    "description": "Create an if statement"
+  },
+  "If Else Statement": {
+    "prefix": "ifelse",
+    "body": [
+      "if ${1:condition} {",
+      "  ${2:return 0;}",
+      "} else {",
+      "  ${3:return 1;}",
+      "}"
+    ],
+    "description": "Create an if/else statement"
+  },
+  "While Loop": {
+    "prefix": "while",
+    "body": [
+      "while ${1:condition} {",
+      "  ${2:i = i + 1;}",
+      "}"
+    ],
+    "description": "Create a while loop"
+  },
+  "Return Statement": {
+    "prefix": "return",
+    "body": [
+      "return ${1:0};"
+    ],
+    "description": "Return from a function"
+  },
+  "Pointer Type": {
+    "prefix": "ptr",
+    "body": [
+      "ptr<${1:Item}>"
+    ],
+    "description": "Insert a pointer type"
+  },
+  "Void Function": {
+    "prefix": "void",
+    "body": [
+      "fn ${1:name}() -> void {",
+      "  ${2:return;}",
+      "}"
+    ],
+    "description": "Define a void function"
+  },
+  "Slice Type": {
+    "prefix": "slice",
+    "body": ["slice<${1:i32}>"],
+    "description": "Insert a slice type"
+  },
+  "Slice Constructor": {
+    "prefix": "slicenew",
+    "body": ["slice(${1:data}, ${2:len})"],
+    "description": "Construct a slice"
+  },
+  "Break Statement": {
+    "prefix": "break",
+    "body": ["break;"],
+    "description": "Exit the nearest while loop"
+  },
+  "Continue Statement": {
+    "prefix": "continue",
+    "body": ["continue;"],
+    "description": "Continue the nearest while loop"
+  },
+  "Unsafe Block": {
+    "prefix": "unsafe",
+    "body": ["unsafe {", "  ${1:call();}", "}"],
+    "description": "Call an unsafe function"
+  },
+  "Contract": {
+    "prefix": "contract",
+    "body": ["contract {", "  requires ${1:n <= 1024};", "  effects ${2:none};", "}"],
+    "description": "Declare an unsafe function contract"
+  }
+}

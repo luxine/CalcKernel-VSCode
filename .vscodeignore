@@ -1,0 +1,16 @@
+.gitignore
+.vscodeignore
+.github/**
+CONTRIBUTING*.md
+src/**
+test/**
+tsconfig.json
+vitest.config.ts
+esbuild.mjs
+pnpm-lock.yaml
+pnpm-workspace.yaml
+node_modules/**
+scripts/**
+out/**
+dist/*.meta.json
+*.vsix

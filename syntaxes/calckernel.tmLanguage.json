@@ -1,0 +1,118 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "CalcKernel",
+  "scopeName": "source.calckernel",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#functionDeclarations" },
+    { "include": "#structDeclarations" },
+    { "include": "#localVariableDeclarations" },
+    { "include": "#typedNames" },
+    { "include": "#memberAccess" },
+    { "include": "#builtinFunctions" },
+    { "include": "#keywords" },
+    { "include": "#functionCalls" },
+    { "include": "#types" },
+    { "include": "#typeReferences" },
+    { "include": "#booleans" },
+    { "include": "#numbers" },
+    { "include": "#operators" },
+    { "include": "#variableReferences" }
+  ],
+  "repository": {
+    "comments": { "patterns": [{ "name": "comment.line.double-slash.calckernel", "match": "//.*$" }] },
+    "functionDeclarations": {
+      "patterns": [{
+        "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+        "captures": {
+          "1": { "name": "keyword.declaration.function.calckernel" },
+          "2": { "name": "entity.name.function.calckernel" }
+        }
+      }]
+    },
+    "structDeclarations": {
+      "patterns": [{
+        "match": "\\b(struct)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+        "captures": {
+          "1": { "name": "keyword.declaration.struct.calckernel" },
+          "2": { "name": "entity.name.type.struct.calckernel" }
+        }
+      }]
+    },
+    "localVariableDeclarations": {
+      "patterns": [{
+        "match": "\\b(let)\\s+([A-Za-z_][A-Za-z0-9_]*)(?=\\s*:)",
+        "captures": {
+          "1": { "name": "keyword.declaration.calckernel" },
+          "2": { "name": "variable.other.definition.local.calckernel" }
+        }
+      }]
+    },
+    "typedNames": {
+      "patterns": [{
+        "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(?=\\s*:)",
+        "captures": {
+          "1": { "name": "variable.other.definition.calckernel" }
+        }
+      }]
+    },
+    "memberAccess": {
+      "patterns": [{
+        "match": "(?<!\\.)(\\.)([A-Za-z_][A-Za-z0-9_]*)",
+        "captures": {
+          "1": { "name": "punctuation.accessor.calckernel" },
+          "2": { "name": "variable.other.member.access.calckernel" }
+        }
+      }]
+    },
+    "builtinFunctions": {
+      "patterns": [{
+        "name": "support.function.builtin.calckernel",
+        "match": "\\b(?:i32_to_f64|u32_to_f64|print_i32|print_i64|print_u32|print_u64|print_f64|print_bool|print_newline)\\b"
+      }]
+    },
+    "functionCalls": {
+      "patterns": [{
+        "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(?=\\s*\\()",
+        "captures": {
+          "1": { "name": "entity.name.function.call.calckernel" }
+        }
+      }]
+    },
+    "keywords": {
+      "patterns": [
+        { "name": "keyword.control.calckernel", "match": "\\b(?:if|else|while|return|break|continue)\\b" },
+        { "name": "keyword.declaration.calckernel", "match": "\\b(?:export|unsafe|fn|let|struct|contract|requires|effects|none)\\b" }
+      ]
+    },
+    "types": {
+      "patterns": [
+        { "name": "storage.type.primitive.calckernel", "match": "\\b(?:i32|i64|u32|u64|f64|bool|void)\\b" },
+        { "name": "storage.type.pointer.calckernel", "match": "\\b(?:ptr|slice)\\b" }
+      ]
+    },
+    "typeReferences": {
+      "patterns": [{ "name": "entity.name.type.calckernel", "match": "\\b[A-Z][A-Za-z0-9_]*\\b" }]
+    },
+    "booleans": { "patterns": [{ "name": "constant.language.boolean.calckernel", "match": "\\b(?:true|false)\\b" }] },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.float.calckernel", "match": "\\b[0-9]+(?:\\.[0-9]+|[eE][+-]?[0-9]+|\\.[0-9]+[eE][+-]?[0-9]+)\\b" },
+        { "name": "constant.numeric.integer.calckernel", "match": "\\b[0-9]+\\b" }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        { "name": "keyword.operator.calckernel", "match": "\\.\\.|==|!=|<=|>=|&&|\\|\\||[+\\-*/%<>=!]" },
+        { "name": "punctuation.separator.calckernel", "match": "[;:,]" },
+        { "name": "punctuation.bracket.calckernel", "match": "[{}\\[\\]()]" }
+      ]
+    },
+    "variableReferences": {
+      "patterns": [{
+        "name": "variable.other.readwrite.calckernel",
+        "match": "\\b(?!(?:if|else|while|return|break|continue|export|unsafe|fn|let|struct|contract|requires|effects|none|i32|i64|u32|u64|f64|bool|void|ptr|slice|true|false)\\b)[a-z_][A-Za-z0-9_]*\\b"
+      }]
+    }
+  }
+}
