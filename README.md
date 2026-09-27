@@ -32,6 +32,16 @@ CK_VSCODE_CKC_BINARY=/absolute/path/to/ckc pnpm package
 
 The compiler source revision is public and pinned. Builds depend only on this repository and that public compiler commit.
 
+## Marketplace pre-releases
+
+The Marketplace requires a numeric `MAJOR.MINOR.PATCH` version even for pre-releases. To publish a public pre-release tag such as `v0.15.0-dev.2`, run **Marketplace numeric pre-release variants** from `main` and enter that tag; its GitHub Release must already exist as a pre-release. For example:
+
+```sh
+gh workflow run marketplace-prerelease.yml --ref main -f source_tag=v0.15.0-dev.2
+```
+
+CI derives `0.15.0` from the tag, packages all six platforms with VS Code's pre-release marker, verifies the source/compiler provenance, and appends the variants and a checksummed provenance record to the same GitHub Release. The original `-dev.2` release assets stay unchanged; CI refuses to overwrite an existing variant asset. Download the six `marketplace-prerelease` VSIX files from that public Release and upload those exact files through the signed-in Marketplace publisher UI. Automated Marketplace publishing is disabled by default; it can be explicitly enabled with the repository variable `MARKETPLACE_PUBLISH_ENABLED=true` and the `VSCE_PAT` secret. The Marketplace entry is still a pre-release; a later stable release must use a different numeric version that has not already been used, for example `0.15.1`.
+
 ## Settings and commands
 
 - `ck.server.path`: absolute path to a compatible `ckc` for language features. Empty uses the bundled binary, then PATH.

@@ -1,0 +1,411 @@
+name: Marketplace numeric pre-release variants
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: Existing public pre-release tag with a published prerelease GitHub Release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-prerelease-${{ inputs.source_tag }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: Validate public source tag
+    runs-on: ubuntu-24.04
+    outputs:
+      source_tag: ${{ steps.derive.outputs.source_tag }}
+      source_sha: ${{ steps.derive.outputs.source_sha }}
+      source_version: ${{ steps.derive.outputs.source_version }}
+      marketplace_version: ${{ steps.derive.outputs.marketplace_version }}
+      compiler_repository: ${{ steps.derive.outputs.compiler_repository }}
+      compiler_sha: ${{ steps.derive.outputs.compiler_sha }}
+      compiler_version: ${{ steps.derive.outputs.compiler_version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.source_tag }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve the immutable source commit and numeric Marketplace version
+        id: derive
+        env:
+          SOURCE_TAG: ${{ inputs.source_tag }}
+        run: |
+          if [[ "$GITHUB_REF" != 'refs/heads/main' ]]; then
+            echo "Dispatch this workflow from main so its source commit is recorded and reviewed." >&2
+            exit 1
+          fi
+          source_sha="$(git -C source rev-parse --verify "refs/tags/${SOURCE_TAG}^{commit}")"
+          checked_out_sha="$(git -C source rev-parse HEAD)"
+          if [[ "$source_sha" != "$checked_out_sha" ]]; then
+            echo "Checked out source does not resolve to the requested tag commit." >&2
+            exit 1
+          fi
+          node scripts/marketplaceVariant.mjs derive \
+            --source-dir source \
+            --tag "$SOURCE_TAG" \
+            --source-sha "$source_sha" \
+            --output "$GITHUB_OUTPUT"
+
+      - name: Require an existing public prerelease GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
+        run: |
+          release="$(gh release view "$SOURCE_TAG" --json tagName,isDraft,isPrerelease)"
+          jq -e --arg tag "$SOURCE_TAG" \
+            '.tagName == $tag and .isDraft == false and .isPrerelease == true' \
+            <<<"$release" >/dev/null
+
+  build:
+    name: ${{ matrix.target }}
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-15
+            executable: target/release/ckc
+          - target: darwin-x64
+            runner: macos-15-intel
+            executable: target/release/ckc
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            executable: target/release/ckc
+          - target: linux-x64
+            runner: ubuntu-24.04
+            executable: target/release/ckc
+          - target: win32-arm64
+            runner: windows-11-arm
+            executable: target/release/ckc.exe
+          - target: win32-x64
+            runner: windows-2025
+            executable: target/release/ckc.exe
+    env:
+      SOURCE_TAG: ${{ needs.validate.outputs.source_tag }}
+      SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+      SOURCE_VERSION: ${{ needs.validate.outputs.source_version }}
+      COMPILER_SHA: ${{ needs.validate.outputs.compiler_sha }}
+      COMPILER_VERSION: ${{ needs.validate.outputs.compiler_version }}
+      CK_VSCODE_CKC_BINARY: ${{ github.workspace }}/compiler/${{ matrix.executable }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+          path: product
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: luxine/CalcKernel
+          ref: ${{ needs.validate.outputs.compiler_sha }}
+          path: compiler
+          persist-credentials: false
+
+      - name: Verify source, workflow, and compiler revisions
+        run: |
+          test "$(git -C product rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C compiler rev-parse HEAD)" = "$COMPILER_SHA"
+          test "$(node -p "require('./product/compiler.lock.json').commit")" = "$COMPILER_SHA"
+          test "$(node -p "require('./product/compiler.lock.json').version")" = "$COMPILER_VERSION"
+          node scripts/marketplaceVariant.mjs derive \
+            --source-dir product \
+            --tag "$SOURCE_TAG" \
+            --source-sha "$SOURCE_SHA"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.16.0
+
+      - name: Activate the locked pnpm version
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.7.0 --activate
+          pnpm --version
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.90.0
+
+      - name: Build the pinned public compiler
+        working-directory: compiler
+        run: cargo build --release --locked --bin ckc
+        env:
+          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
+
+      - name: Test public compiler workspace paths and symbols
+        working-directory: compiler
+        run: cargo test --locked --bin ckc cli::lsp::workspace::tests
+
+      - name: Install extension dependencies
+        working-directory: product
+        run: pnpm install --frozen-lockfile
+
+      - name: Test, typecheck, and build the source tag
+        working-directory: product
+        run: |
+          pnpm test
+          pnpm typecheck
+          pnpm build
+
+      - name: Run the existing public package audit first
+        working-directory: product
+        run: pnpm package
+
+      - name: Smoke-test source and bundled VSIX on Linux x64
+        if: matrix.target == 'linux-x64'
+        working-directory: product
+        run: |
+          xvfb-run -a pnpm test:integration
+          xvfb-run -a pnpm test:vsix
+        env:
+          CK_VSCODE_TEST_CKC: ${{ github.workspace }}/compiler/target/release/ckc
+
+      - name: Package the numeric Marketplace pre-release variant
+        env:
+          SOURCE_TAG: ${{ needs.validate.outputs.source_tag }}
+          COMPILER_SHA: ${{ needs.validate.outputs.compiler_sha }}
+          TARGET: ${{ matrix.target }}
+          VARIANT_PATH: ${{ github.workspace }}/product/out/calckernel-vscode-plugin-${{ needs.validate.outputs.marketplace_version }}-marketplace-prerelease-${{ matrix.target }}.vsix
+        run: |
+          node scripts/marketplaceVariant.mjs package \
+            --source-dir product \
+            --tag "$SOURCE_TAG" \
+            --target "$TARGET" \
+            --compiler-sha "$COMPILER_SHA" \
+            --output "$VARIANT_PATH"
+
+      - name: Extract variant metadata
+        if: runner.os != 'Windows'
+        env:
+          VARIANT_PATH: ${{ github.workspace }}/product/out/calckernel-vscode-plugin-${{ needs.validate.outputs.marketplace_version }}-marketplace-prerelease-${{ matrix.target }}.vsix
+        run: |
+          mkdir -p variant-inspection
+          unzip -q "$VARIANT_PATH" -d variant-inspection
+
+      - name: Extract variant metadata on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VARIANT_PATH: ${{ github.workspace }}/product/out/calckernel-vscode-plugin-${{ needs.validate.outputs.marketplace_version }}-marketplace-prerelease-${{ matrix.target }}.vsix
+        run: Expand-Archive -LiteralPath $env:VARIANT_PATH -DestinationPath variant-inspection -Force
+
+      - name: Verify package identity, pre-release marker, target, repository, and compiler provenance
+        env:
+          SOURCE_TAG: ${{ needs.validate.outputs.source_tag }}
+          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+          SOURCE_VERSION: ${{ needs.validate.outputs.source_version }}
+          COMPILER_SHA: ${{ needs.validate.outputs.compiler_sha }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          node scripts/marketplaceVariant.mjs verify \
+            --directory variant-inspection \
+            --tag "$SOURCE_TAG" \
+            --source-sha "$SOURCE_SHA" \
+            --source-version "$SOURCE_VERSION" \
+            --compiler-sha "$COMPILER_SHA" \
+            --target "$TARGET"
+
+      - name: Ensure packaging did not modify the source tag
+        run: |
+          git -C product diff --exit-code
+          test -z "$(git -C product status --porcelain --untracked-files=all)"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: marketplace-variant-${{ matrix.target }}
+          path: product/out/calckernel-vscode-plugin-${{ needs.validate.outputs.marketplace_version }}-marketplace-prerelease-${{ matrix.target }}.vsix
+          if-no-files-found: error
+          retention-days: 7
+
+  attach-release-assets:
+    name: Attach audited variants to the existing prerelease
+    needs: [validate, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      SOURCE_TAG: ${{ needs.validate.outputs.source_tag }}
+      SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+      SOURCE_VERSION: ${{ needs.validate.outputs.source_version }}
+      MARKETPLACE_VERSION: ${{ needs.validate.outputs.marketplace_version }}
+      COMPILER_REPOSITORY: ${{ needs.validate.outputs.compiler_repository }}
+      COMPILER_SHA: ${{ needs.validate.outputs.compiler_sha }}
+      COMPILER_VERSION: ${{ needs.validate.outputs.compiler_version }}
+      WORKFLOW_COMMIT: ${{ github.sha }}
+      WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+          path: product
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Confirm the release tag still resolves to the built source SHA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git -C product fetch --quiet origin "refs/tags/${SOURCE_TAG}:refs/tags/${SOURCE_TAG}"
+          tag_sha="$(git -C product rev-parse --verify "refs/tags/${SOURCE_TAG}^{commit}")"
+          test "$tag_sha" = "$SOURCE_SHA"
+          release="$(gh release view "$SOURCE_TAG" --json tagName,isDraft,isPrerelease)"
+          jq -e --arg tag "$SOURCE_TAG" \
+            '.tagName == $tag and .isDraft == false and .isPrerelease == true' \
+            <<<"$release" >/dev/null
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: marketplace-variant-*
+          path: dist/variants
+          merge-multiple: true
+
+      - name: Capture the original six release assets before adding variants
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p dist/originals-before dist/originals-after
+          gh release download "$SOURCE_TAG" \
+            --pattern "calckernel-vscode-plugin-${SOURCE_VERSION}-*.vsix" \
+            --dir dist/originals-before
+
+      - name: Create provenance and checksums for both commit sources and all assets
+        run: |
+          provenance="dist/calckernel-vscode-plugin-${MARKETPLACE_VERSION}-marketplace-prerelease-provenance.json"
+          node scripts/marketplaceProvenance.mjs create \
+            --source-tag "$SOURCE_TAG" \
+            --source-sha "$SOURCE_SHA" \
+            --source-version "$SOURCE_VERSION" \
+            --marketplace-version "$MARKETPLACE_VERSION" \
+            --workflow-commit "$WORKFLOW_COMMIT" \
+            --workflow-run-url "$WORKFLOW_RUN_URL" \
+            --compiler-repository "$COMPILER_REPOSITORY" \
+            --compiler-sha "$COMPILER_SHA" \
+            --compiler-version "$COMPILER_VERSION" \
+            --variant-directory dist/variants \
+            --original-directory dist/originals-before \
+            --output "$provenance"
+          (cd dist && sha256sum -c "$(basename "$provenance").sha256")
+
+      - name: Refuse any existing variant or provenance asset before upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          assets=(dist/variants/*.vsix dist/calckernel-vscode-plugin-"${MARKETPLACE_VERSION}"-marketplace-prerelease-provenance.json*)
+          if [[ ${#assets[@]} -ne 8 ]]; then
+            echo "Expected six VSIX variants, provenance JSON, and its checksum; found ${#assets[@]} assets." >&2
+            exit 1
+          fi
+          release_assets="$(gh release view "$SOURCE_TAG" --json assets --jq '.assets[].name')"
+          for asset_path in "${assets[@]}"; do
+            asset_name="$(basename "$asset_path")"
+            if grep -Fqx "$asset_name" <<<"$release_assets"; then
+              echo "Release asset already exists; refusing to overwrite or append any variant: $asset_name." >&2
+              exit 1
+            fi
+          done
+          gh release upload "$SOURCE_TAG" "${assets[@]}"
+
+      - name: Verify every original dev-tag asset is unchanged
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "$SOURCE_TAG" \
+            --pattern "calckernel-vscode-plugin-${SOURCE_VERSION}-*.vsix" \
+            --dir dist/originals-after
+          node scripts/marketplaceProvenance.mjs verify-originals \
+            --directory dist/originals-after \
+            --provenance "dist/calckernel-vscode-plugin-${MARKETPLACE_VERSION}-marketplace-prerelease-provenance.json"
+
+  publish-marketplace:
+    name: Publish numeric versions as Marketplace pre-releases
+    if: vars.MARKETPLACE_PUBLISH_ENABLED == 'true'
+    needs: [validate, build, attach-release-assets]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+          path: product
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.16.0
+
+      - name: Activate pnpm and install public package metadata dependencies
+        working-directory: product
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.7.0 --activate
+          pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: marketplace-variant-*
+          path: dist
+          merge-multiple: true
+
+      - name: Require the Marketplace publishing credential
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [[ -z "$VSCE_PAT" ]]; then
+            echo "Set the public repository secret VSCE_PAT before running this workflow." >&2
+            exit 1
+          fi
+
+      - name: Publish all six numeric variants as pre-releases
+        working-directory: product
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          MARKETPLACE_VERSION: ${{ needs.validate.outputs.marketplace_version }}
+        run: |
+          for target in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-arm64 win32-x64; do
+            package="${GITHUB_WORKSPACE}/dist/calckernel-vscode-plugin-${MARKETPLACE_VERSION}-marketplace-prerelease-${target}.vsix"
+            test -f "$package"
+            pnpm exec vsce publish --packagePath "$package" --pre-release --skip-duplicate
+          done

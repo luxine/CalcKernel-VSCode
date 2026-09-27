@@ -37,6 +37,96 @@ export function compilerBinaryFromArgs(args, env = process.env) {
   return binary;
 }
 
+export function deriveMarketplacePrereleaseVersion(tag, sourceVersion) {
+  const match = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)$/.exec(tag);
+  if (!match) throw new Error('Marketplace numeric variants require a valid pre-release tag such as v0.15.0-dev.2.');
+  const prereleaseIdentifiers = match[4].split('.');
+  if (prereleaseIdentifiers.some((identifier) => /^\d+$/.test(identifier) && identifier.length > 1 && identifier.startsWith('0'))) {
+    throw new Error('Marketplace numeric variants require a valid pre-release tag without leading zero identifiers.');
+  }
+  const taggedSourceVersion = tag.slice(1);
+  if (sourceVersion !== taggedSourceVersion) {
+    throw new Error('Source package version ' + sourceVersion + ' does not match tag ' + tag + '.');
+  }
+  return match.slice(1, 4).join('.');
+}
+
+export function marketplacePrereleasePackageArgs(tag, sourceVersion, target, out) {
+  deriveMarketplacePrereleaseVersion(tag, sourceVersion);
+  if (!(target in triples)) throw new Error('Unsupported VS Code platform: ' + target);
+  const version = tag.slice(1).split('-', 1)[0];
+  return [
+    'package', '--no-dependencies', '--target', target, '--out', out,
+    '--pre-release', '--no-update-package-json', '--no-git-tag-version', version
+  ];
+}
+
+export function marketplacePrereleaseVsixName(packageName, version, target) {
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Marketplace package version must be numeric.');
+  if (!(target in triples)) throw new Error('Unsupported VS Code platform: ' + target);
+  return packageName + '-' + version + '-marketplace-prerelease-' + target + '.vsix';
+}
+
+function xmlAttribute(attributes, name) {
+  const match = new RegExp("(?:^|\\s)" + name + "=[\"']([^\"']*)[\"']").exec(attributes);
+  return match?.[1];
+}
+
+export function validateMarketplaceVariantMetadata({ tag, sourceVersion, packageJson, compilerLock, manifest, expectedCompilerCommit, expectedTarget }) {
+  let version;
+  try {
+    version = deriveMarketplacePrereleaseVersion(tag, sourceVersion);
+  } catch (error) {
+    return String(error.message);
+  }
+  if (packageJson.name !== 'calckernel-vscode-plugin') return 'Marketplace package name does not match the published extension identity.';
+  if (packageJson.publisher !== 'Luxine') return 'Marketplace publisher does not match the published extension identity.';
+  if (packageJson.version !== version) return 'Marketplace package.json version must be the numeric version derived from the source tag.';
+  if (packageJson.repository?.url !== 'https://github.com/luxine/CalcKernel-VSCode.git') {
+    return 'Marketplace package repository must point to the public VS Code repository.';
+  }
+  if (packageJson.bugs?.url !== 'https://github.com/luxine/CalcKernel-VSCode/issues') {
+    return 'Marketplace package issue tracker must point to the public VS Code repository.';
+  }
+  if (compilerLock.repository !== 'https://github.com/luxine/CalcKernel') {
+    return 'Bundled compiler provenance must point to the public CalcKernel repository.';
+  }
+  if (!/^[0-9a-f]{40}$/.test(compilerLock.commit) || (expectedCompilerCommit && compilerLock.commit !== expectedCompilerCommit)) {
+    return 'Bundled compiler provenance does not match the locked public compiler commit.';
+  }
+  if (typeof compilerLock.version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(compilerLock.version)) {
+    return 'Bundled compiler provenance has an invalid compiler version.';
+  }
+
+  const identity = /<Identity\b([^>]*)\/?\s*>/s.exec(manifest)?.[1];
+  if (!identity) return 'VSIX manifest is missing its Identity element.';
+  if (xmlAttribute(identity, 'Id') !== packageJson.name || xmlAttribute(identity, 'Publisher') !== packageJson.publisher) {
+    return 'VSIX manifest publisher or extension identity does not match package.json.';
+  }
+  if (xmlAttribute(identity, 'Version') !== version) return 'VSIX manifest version must be the numeric version derived from the source tag.';
+  const properties = Array.from(manifest.matchAll(/<Property\b([^>]*)\/?\s*>/g), (match) => match[1]);
+  const propertyValue = (id) => {
+    const property = properties.find((attributes) => xmlAttribute(attributes, 'Id') === id);
+    return property && xmlAttribute(property, 'Value');
+  };
+  const preRelease = properties.some((attributes) =>
+    xmlAttribute(attributes, 'Id') === 'Microsoft.VisualStudio.Code.PreRelease' && xmlAttribute(attributes, 'Value') === 'true'
+  );
+  if (!preRelease) return 'VSIX manifest must mark this numeric version as a pre-release.';
+  const actualTarget = xmlAttribute(identity, 'TargetPlatform') ?? propertyValue('Microsoft.VisualStudio.Code.TargetPlatform');
+  if (expectedTarget && actualTarget !== expectedTarget) {
+    return 'VSIX manifest target does not match the requested platform.';
+  }
+  if (propertyValue('Microsoft.VisualStudio.Services.Links.Source') !== 'https://github.com/luxine/CalcKernel-VSCode.git' ||
+      propertyValue('Microsoft.VisualStudio.Services.Links.GitHub') !== 'https://github.com/luxine/CalcKernel-VSCode.git') {
+    return 'VSIX manifest source links must point to the public VS Code repository.';
+  }
+  if (propertyValue('Microsoft.VisualStudio.Services.Links.Support') !== 'https://github.com/luxine/CalcKernel-VSCode/issues') {
+    return 'VSIX manifest support link must point to the public VS Code issue tracker.';
+  }
+  return undefined;
+}
+
 export function vscePackageArgs(version, target, out) {
   const args = ['package', '--no-dependencies', '--target', target, '--out', out];
   if (version.split('+', 1)[0].includes('-')) args.push('--pre-release');

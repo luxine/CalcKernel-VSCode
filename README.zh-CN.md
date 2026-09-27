@@ -32,6 +32,16 @@ CK_VSCODE_CKC_BINARY=/absolute/path/to/ckc pnpm package
 
 编译器源码提交公开且固定。构建只依赖本仓库和该公开编译器提交。
 
+## Marketplace 预发布
+
+Marketplace 的版本号必须是数字形式 `MAJOR.MINOR.PATCH`，预发布也一样。要发布 `v0.15.0-dev.2` 这样的公开预发布标签，请在 `main` 上运行 **Marketplace numeric pre-release variants** 工作流，并输入已存在的标签；该标签的 GitHub Release 必须已存在且标记为预发布。例如：
+
+```sh
+gh workflow run marketplace-prerelease.yml --ref main -f source_tag=v0.15.0-dev.2
+```
+
+CI 会严格从标签推导 `0.15.0`，为六个平台打包带有 VS Code 预发布标记的扩展，验证源码与编译器来源，然后将变体和带校验和的来源记录追加到同一个 GitHub Release。原有 `-dev.2` 资产保持不变；若预期变体资产已存在，CI 会拒绝覆盖。从该公开 Release 下载六个 `marketplace-prerelease` VSIX 文件，并在已登录的 Marketplace 发布者界面上传这些原始文件。自动 Marketplace 发布默认关闭；如需启用，可设置仓库变量 `MARKETPLACE_PUBLISH_ENABLED=true` 和 `VSCE_PAT` secret。Marketplace 中的该版本仍是预发布；以后发布正式版必须使用尚未使用过的其他数字版本，例如 `0.15.1`。
+
 ## 设置与命令
 
 - `ck.server.path`：语言服务使用的兼容 `ckc` 绝对路径。留空时依次使用安装包内的程序和 PATH。
