@@ -120,6 +120,7 @@ function verify(options) {
   const tag = requireOption(options, 'tag');
   const sourceSha = requireSha(requireOption(options, 'source-sha'), 'Source tag SHA');
   const compilerSha = requireSha(requireOption(options, 'compiler-sha'), 'Compiler SHA');
+  const compilerVersion = requireOption(options, 'compiler-version');
   const target = requireOption(options, 'target');
   const packageJson = readJson(resolve(extensionRoot, 'package.json'), 'packaged extension package.json');
   const compilerLock = readJson(resolve(extensionRoot, 'compiler.lock.json'), 'packaged compiler.lock.json');
@@ -131,6 +132,7 @@ function verify(options) {
     compilerLock,
     manifest,
     expectedCompilerCommit: compilerSha,
+    expectedCompilerVersion: compilerVersion,
     expectedTarget: target
   });
   if (error) throw new Error(error);
@@ -143,7 +145,8 @@ function verify(options) {
     extension: packageJson.name,
     repository: packageJson.repository.url,
     compilerRepository: compilerLock.repository,
-    compilerSha: compilerLock.commit
+    compilerSha: compilerLock.commit,
+    compilerVersion: compilerLock.version
   }) + '\n');
 }
 

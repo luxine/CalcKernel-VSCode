@@ -72,7 +72,7 @@ function xmlAttribute(attributes, name) {
   return match?.[1];
 }
 
-export function validateMarketplaceVariantMetadata({ tag, sourceVersion, packageJson, compilerLock, manifest, expectedCompilerCommit, expectedTarget }) {
+export function validateMarketplaceVariantMetadata({ tag, sourceVersion, packageJson, compilerLock, manifest, expectedCompilerCommit, expectedCompilerVersion, expectedTarget }) {
   let version;
   try {
     version = deriveMarketplacePrereleaseVersion(tag, sourceVersion);
@@ -96,6 +96,9 @@ export function validateMarketplaceVariantMetadata({ tag, sourceVersion, package
   }
   if (typeof compilerLock.version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(compilerLock.version)) {
     return 'Bundled compiler provenance has an invalid compiler version.';
+  }
+  if (expectedCompilerVersion && compilerLock.version !== expectedCompilerVersion) {
+    return 'Bundled compiler version does not match the validated public compiler version.';
   }
 
   const identity = /<Identity\b([^>]*)\/?\s*>/s.exec(manifest)?.[1];

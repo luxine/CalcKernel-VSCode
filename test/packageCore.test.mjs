@@ -81,9 +81,13 @@ test('numeric Marketplace VSIX metadata verifies package identity, target, prere
   };
   const compilerLock = { repository: 'https://github.com/luxine/CalcKernel', commit, version: '0.15.0-dev.0' };
   const manifest = '<PackageManifest><Metadata><Identity Id="calckernel-vscode-plugin" Publisher="Luxine" Version="0.15.0" TargetPlatform="linux-x64"/><Properties><Property Id="Microsoft.VisualStudio.Code.TargetPlatform" Value="linux-x64"/><Property Id="Microsoft.VisualStudio.Code.PreRelease" Value="true"/><Property Id="Microsoft.VisualStudio.Services.Links.Source" Value="https://github.com/luxine/CalcKernel-VSCode.git"/><Property Id="Microsoft.VisualStudio.Services.Links.GitHub" Value="https://github.com/luxine/CalcKernel-VSCode.git"/><Property Id="Microsoft.VisualStudio.Services.Links.Support" Value="https://github.com/luxine/CalcKernel-VSCode/issues"/></Properties></Metadata></PackageManifest>';
-  const valid = { tag: 'v0.15.0-dev.2', sourceVersion: '0.15.0-dev.2', packageJson, compilerLock, manifest, expectedCompilerCommit: commit, expectedTarget: 'linux-x64' };
+  const valid = {
+    tag: 'v0.15.0-dev.2', sourceVersion: '0.15.0-dev.2', packageJson, compilerLock, manifest,
+    expectedCompilerCommit: commit, expectedCompilerVersion: '0.15.0-dev.0', expectedTarget: 'linux-x64'
+  };
   assert.equal(validateMarketplaceVariantMetadata(valid), undefined);
   assert.match(validateMarketplaceVariantMetadata({ ...valid, expectedCompilerCommit: 'abcdef0123456789abcdef0123456789abcdef01' }), /compiler commit/);
+  assert.match(validateMarketplaceVariantMetadata({ ...valid, expectedCompilerVersion: '0.16.0-dev.0' }), /compiler version/);
   assert.match(validateMarketplaceVariantMetadata({ ...valid, expectedTarget: 'darwin-arm64' }), /target/);
   assert.match(validateMarketplaceVariantMetadata({ ...valid, manifest: manifest.replace('Value="true"', 'Value="false"') }), /pre-release/);
   assert.match(validateMarketplaceVariantMetadata({ ...valid, manifest: manifest.replace('Links.GitHub" Value="https://github.com/luxine/CalcKernel-VSCode.git', 'Links.GitHub" Value="https://example.com') }), /source links/);

@@ -218,7 +218,10 @@ jobs:
         shell: pwsh
         env:
           VARIANT_PATH: ${{ github.workspace }}/product/out/calckernel-vscode-plugin-${{ needs.validate.outputs.marketplace_version }}-marketplace-prerelease-${{ matrix.target }}.vsix
-        run: Expand-Archive -LiteralPath $env:VARIANT_PATH -DestinationPath variant-inspection -Force
+        run: |
+          $zipPath = Join-Path $env:RUNNER_TEMP 'variant.zip'
+          Copy-Item -LiteralPath $env:VARIANT_PATH -Destination $zipPath
+          Expand-Archive -LiteralPath $zipPath -DestinationPath variant-inspection -Force
 
       - name: Verify package identity, pre-release marker, target, repository, and compiler provenance
         env:
@@ -226,6 +229,7 @@ jobs:
           SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
           SOURCE_VERSION: ${{ needs.validate.outputs.source_version }}
           COMPILER_SHA: ${{ needs.validate.outputs.compiler_sha }}
+          COMPILER_VERSION: ${{ needs.validate.outputs.compiler_version }}
           TARGET: ${{ matrix.target }}
         run: |
           node scripts/marketplaceVariant.mjs verify \
@@ -234,6 +238,7 @@ jobs:
             --source-sha "$SOURCE_SHA" \
             --source-version "$SOURCE_VERSION" \
             --compiler-sha "$COMPILER_SHA" \
+            --compiler-version "$COMPILER_VERSION" \
             --target "$TARGET"
 
       - name: Ensure packaging did not modify the source tag
