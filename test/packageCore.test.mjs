@@ -11,6 +11,7 @@ import { compilerBinaryFromArgs, licenseTextMatches, platformTarget, requiredVsi
 test('license comparison accepts checkout line endings but rejects changed text', () => {
   assert.equal(licenseTextMatches(Buffer.from('Line one\nLine two\n'), Buffer.from('Line one\r\nLine two\r\n')), true);
   assert.equal(licenseTextMatches(Buffer.from('Line one\nLine two\n'), Buffer.from('Line one\nLine three\n')), false);
+  assert.equal(licenseTextMatches(Buffer.from([0xff, 0x0a]), Buffer.from([0xfe, 0x0a])), false);
 });
 
 test('platform targets cover the six release hosts', () => {

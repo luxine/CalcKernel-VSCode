@@ -55,7 +55,7 @@ export function validateBinaryIdentity(output, version, target) {
 }
 
 export function licenseTextMatches(checkedIn, installed) {
-  const normalizeLineEndings = (text) => text.toString('utf8').replace(/\r\n/g, '\n');
+  const normalizeLineEndings = (text) => text.toString('latin1').replace(/\r\n/g, '\n');
   return normalizeLineEndings(checkedIn) === normalizeLineEndings(installed);
 }
 
