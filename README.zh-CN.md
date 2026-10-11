@@ -8,7 +8,7 @@ CalcKernel 为 CK `.ck` 文件提供语言支持，包括语法高亮、代码�
 
 ## 安装
 
-从 [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=Luxine.calckernel-vscode-plugin) 安装 **CalcKernel** 扩展，或从 [GitHub Releases](https://github.com/luxine/CalcKernel-VSCode/releases) 下载对应平台的 VSIX。每个 VSIX 都包含仅启用前端的 `ckc` 语言服务和 `compiler.lock.json` 构建来源记录，因此诊断可离线工作且不需要 LLVM。手动配置的语言服务端须为 `ckc` 0.15.x。
+从 [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=Luxine.calckernel-vscode-plugin) 安装 **CalcKernel** 扩展，或从 [GitHub Releases](https://github.com/luxine/CalcKernel-VSCode/releases) 下载对应平台的 VSIX。每个 VSIX 都包含仅启用前端的 `ckc` 语言服务和 `compiler.lock.json` 构建来源记录，因此诊断可离线工作且不需要 LLVM。手动配置的语言服务端须为 `ckc` 0.15.x 或 0.16.x。Run 和 Build 使用 `ck.compiler.path` 或 `PATH` 中的编译器，并要求它启用了 Native toolchain，且属于上述受支持版本系列。
 
 ## 从源码构建
 

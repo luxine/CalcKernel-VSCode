@@ -8,7 +8,7 @@ Language features include completion, hover, signature help, go to definition, r
 
 ## Install
 
-Install the **CalcKernel** extension from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=Luxine.calckernel-vscode-plugin), or download a platform-specific VSIX from [GitHub Releases](https://github.com/luxine/CalcKernel-VSCode/releases). Each VSIX bundles a frontend-only `ckc` language server and the `compiler.lock.json` build provenance, so diagnostics work offline and do not require LLVM. A manually configured language server must be `ckc` 0.15.x.
+Install the **CalcKernel** extension from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=Luxine.calckernel-vscode-plugin), or download a platform-specific VSIX from [GitHub Releases](https://github.com/luxine/CalcKernel-VSCode/releases). Each VSIX bundles a frontend-only `ckc` language server and the `compiler.lock.json` build provenance, so diagnostics work offline and do not require LLVM. A manually configured language server must be `ckc` 0.15.x or 0.16.x. Run and Build use `ck.compiler.path` or `PATH` and require a Native-enabled compiler from one of those supported lines.
 
 ## Build from source
 
