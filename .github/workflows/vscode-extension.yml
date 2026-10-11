@@ -102,11 +102,12 @@ jobs:
         with:
           toolchain: 1.90.0
 
+      - name: Configure compiler source paths
+        run: node scripts/compilerBuildEnvironment.mjs
+
       - name: Build pinned public compiler
         working-directory: CalcKernel
         run: cargo build --release --locked --bin ckc
-        env:
-          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
 
       - name: Test CK workspace paths and symbols
         working-directory: CalcKernel

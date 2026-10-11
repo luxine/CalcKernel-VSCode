@@ -4,7 +4,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSy
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildPublicCompiler, parseCompilerLock } from './publicCompiler.mjs';
-import { compilerBinaryFromArgs, licenseTextMatches, platformTarget, requiredVsixFiles, validateBinaryIdentity, validateBundledPackages, validateNotices, vscePackageArgs } from './packageCore.mjs';
+import { compilerBinaryFromArgs, licenseTextMatches, platformTarget, requiredVsixFiles, validateBinaryIdentity, validateBundledPackages, validateNoCompilerCheckoutInVsix, validateNotices, vscePackageArgs } from './packageCore.mjs';
 
 const extensionRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageJson = JSON.parse(readFileSync(resolve(extensionRoot, 'package.json'), 'utf8'));
@@ -43,6 +43,8 @@ if (contents.error || contents.status !== 0) {
   throw new Error('Cannot list VSIX contents: ' + String(contents.error ?? contents.stderr));
 }
 const listed = new Set(contents.stdout.split(/\r?\n/));
+const compilerCheckoutMismatch = validateNoCompilerCheckoutInVsix(listed);
+if (compilerCheckoutMismatch) throw new Error(compilerCheckoutMismatch);
 const notices = readFileSync(resolve(extensionRoot, 'THIRD_PARTY_NOTICES.md'), 'utf8');
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 const licenses = spawnSync(pnpm, ['licenses', 'list', '--prod', '--json'], {

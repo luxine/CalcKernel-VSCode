@@ -3,6 +3,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { compilerBuildEnvironment } from './compilerBuildEnvironment.mjs';
+
+export { compilerBuildEnvironment } from './compilerBuildEnvironment.mjs';
 
 export function parseLockedCompilerRevision(value) {
   const revision = value.trim();
@@ -32,14 +35,6 @@ export function parseCompilerLock(value) {
   return lock;
 }
 
-export function compilerBuildEnvironment(environment, platform) {
-  if (platform !== 'win32') return environment;
-  return {
-    ...environment,
-    RUSTFLAGS: [environment.RUSTFLAGS, '-C target-feature=+crt-static'].filter(Boolean).join(' ')
-  };
-}
-
 export function buildPublicCompiler(lockedCompiler) {
   const extensionRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const lock = lockedCompiler ?? parseCompilerLock(readFileSync(resolve(extensionRoot, 'compiler.lock.json'), 'utf8'));
@@ -56,7 +51,7 @@ export function buildPublicCompiler(lockedCompiler) {
   try {
     run('git', ['clone', '--quiet', '--filter=blob:none', '--no-checkout', lock.repository, checkout]);
     run('git', ['checkout', '--quiet', '--detach', revision], checkout);
-    run('cargo', ['build', '--release', '--locked', '--bin', 'ckc'], checkout, compilerBuildEnvironment(process.env, process.platform));
+    run('cargo', ['build', '--release', '--locked', '--bin', 'ckc'], checkout, compilerBuildEnvironment(process.env, process.platform, checkout));
     const binary = resolve(checkout, 'target', 'release', process.platform === 'win32' ? 'ckc.exe' : 'ckc');
     if (!existsSync(binary)) throw new Error('The pinned public CalcKernel build did not produce ckc.');
     return {

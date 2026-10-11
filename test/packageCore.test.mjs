@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import { builtinModules } from 'node:module';
 import { test } from 'node:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, posix, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compilerBuildEnvironment, parseCompilerLock, parseLockedCompilerRevision } from '../scripts/publicCompiler.mjs';
 import { createMarketplaceProvenance, verifyOriginalAssetRecords } from '../scripts/marketplaceProvenance.mjs';
-import { compilerBinaryFromArgs, deriveMarketplacePrereleaseVersion, licenseTextMatches, marketplacePrereleasePackageArgs, marketplacePrereleaseVsixName, platformTarget, requiredVsixFiles, validateBinaryIdentity, validateBundledPackages, validateMarketplaceVariantMetadata, validateNotices, vscePackageArgs } from '../scripts/packageCore.mjs';
+import { compilerBinaryFromArgs, deriveMarketplacePrereleaseVersion, licenseTextMatches, marketplacePrereleasePackageArgs, marketplacePrereleaseVsixName, platformTarget, requiredVsixFiles, validateBinaryIdentity, validateBundledPackages, validateMarketplaceVariantMetadata, validateNoCompilerCheckoutInVsix, validateNotices, vscePackageArgs } from '../scripts/packageCore.mjs';
 
 test('license comparison accepts checkout line endings but rejects changed text', () => {
   assert.equal(licenseTextMatches(Buffer.from('Line one\nLine two\n'), Buffer.from('Line one\r\nLine two\r\n')), true);
@@ -149,6 +149,186 @@ test('public compiler Windows builds preserve flags and statically link the CRT'
   assert.equal(compilerBuildEnvironment({}, 'darwin').RUSTFLAGS, undefined);
 });
 
+test('compiler builds remap workspace, Cargo, Rustup, and home paths into fixed prefixes', () => {
+  const environment = compilerBuildEnvironment({
+    GITHUB_WORKSPACE: '/home/worker/project',
+    HOME: '/home/worker',
+    CARGO_HOME: '/home/worker/.cargo',
+    RUSTUP_HOME: '/home/worker/.rustup',
+    RUSTFLAGS: '--cfg ck_release'
+  }, 'linux');
+  const flags = environment.CARGO_ENCODED_RUSTFLAGS.split('\x1f');
+
+  assert.deepEqual(flags.slice(0, 2), ['--cfg', 'ck_release']);
+  assert.ok(flags.includes('--remap-path-prefix=/home/worker/project=/workspace'));
+  assert.ok(flags.includes('--remap-path-prefix=/home/worker/.cargo=/cargo'));
+  assert.ok(flags.includes('--remap-path-prefix=/home/worker/.rustup=/rustup'));
+  assert.ok(flags.includes('--remap-path-prefix=/home/worker=/home'));
+});
+
+test('compiler build path remaps preserve Windows static CRT flags and paths containing spaces', () => {
+  const environment = compilerBuildEnvironment({
+    GITHUB_WORKSPACE: 'C:\\Users\\runner admin\\_work\\project',
+    HOME: 'C:\\Users\\runner admin',
+    CARGO_HOME: 'C:\\Users\\runner admin\\.cargo',
+    RUSTUP_HOME: 'D:\\toolchain cache\\rustup',
+    RUSTFLAGS: '--cfg ck_release'
+  }, 'win32');
+  const flags = environment.CARGO_ENCODED_RUSTFLAGS.split('\x1f');
+
+  assert.ok(flags.includes('--cfg'));
+  assert.ok(flags.includes('ck_release'));
+  assert.ok(flags.includes('-C'));
+  assert.ok(flags.includes('target-feature=+crt-static'));
+  assert.ok(flags.includes('--remap-path-prefix=C:\\Users\\runner admin\\_work\\project=/workspace'));
+  assert.ok(flags.includes('--remap-path-prefix=C:\\Users\\runner admin\\.cargo=/cargo'));
+  assert.ok(flags.includes('--remap-path-prefix=D:\\toolchain cache\\rustup=/rustup'));
+  assert.ok(flags.includes('--remap-path-prefix=C:\\Users\\runner admin=/home'));
+});
+
+test('Windows builds force static CRT after conflicting encoded target-feature flags', () => {
+  const inputs = [
+    '--cfg\x1fkeep_this\x1f-C\x1ftarget-feature=+crt-static\x1f-C\x1ftarget-feature=-crt-static',
+    '-C\x1ftarget-feature=+crt-static\x1f-C\x1ftarget-feature=-crt-static,+sse2',
+    '-C\x1ftarget-feature=+crt-static,-crt-static'
+  ];
+
+  for (const encodedFlags of inputs) {
+    const flags = compilerBuildEnvironment({ CARGO_ENCODED_RUSTFLAGS: encodedFlags }, 'win32')
+      .CARGO_ENCODED_RUSTFLAGS.split('\x1f');
+    const targetFeatureOptions = flags.filter((flag, index) =>
+      flags[index - 1] === '-C' && flag.startsWith('target-feature=')
+    );
+
+    assert.equal(targetFeatureOptions.at(-1), 'target-feature=+crt-static');
+  }
+
+  const encoded = compilerBuildEnvironment({ CARGO_ENCODED_RUSTFLAGS: inputs[0] }, 'win32')
+    .CARGO_ENCODED_RUSTFLAGS.split('\x1f');
+  assert.ok(encoded.includes('--cfg'));
+  assert.ok(encoded.includes('keep_this'));
+});
+
+test('Windows legacy RUSTFLAGS also end with static CRT after a conflicting override', () => {
+  const inheritedFlags = '-C target-feature=+crt-static -C target-feature=-crt-static';
+  const environment = compilerBuildEnvironment({ RUSTFLAGS: inheritedFlags }, 'win32');
+
+  assert.equal(environment.RUSTFLAGS, inheritedFlags + ' -C target-feature=+crt-static');
+});
+
+test('an explicitly empty encoded Cargo flag list overrides legacy RUSTFLAGS', () => {
+  const environment = compilerBuildEnvironment({
+    HOME: '/home/worker',
+    RUSTFLAGS: '--cfg legacy_flag',
+    CARGO_ENCODED_RUSTFLAGS: ''
+  }, 'linux');
+  const flags = environment.CARGO_ENCODED_RUSTFLAGS.split('\x1f');
+
+  assert.equal(flags.includes('legacy_flag'), false);
+  assert.equal(flags.includes('--cfg'), false);
+});
+
+test('nonempty encoded Cargo flags take precedence over legacy RUSTFLAGS', () => {
+  const environment = compilerBuildEnvironment({
+    HOME: '/home/worker',
+    RUSTFLAGS: '--cfg legacy_flag',
+    CARGO_ENCODED_RUSTFLAGS: '--cfg\x1fencoded_flag'
+  }, 'linux');
+  const flags = environment.CARGO_ENCODED_RUSTFLAGS.split('\x1f');
+
+  assert.deepEqual(flags.slice(0, 2), ['--cfg', 'encoded_flag']);
+  assert.equal(flags.includes('legacy_flag'), false);
+});
+
+test('rustc maps an absolute source nested under Cargo home with the specific prefix', () => {
+  const pathApi = process.platform === 'win32' ? win32 : posix;
+  const root = mkdtempSync(join(tmpdir(), 'ck-rust-remap-'));
+  const workspace = pathApi.join(root, 'workspace');
+  const home = pathApi.join(root, 'worker home');
+  const cargoHome = pathApi.join(home, '.cargo');
+  const rustupHome = process.env.RUSTUP_HOME || pathApi.join(homedir(), '.rustup');
+  const nestedSource = pathApi.join(cargoHome, 'registry', 'source.rs');
+  const mainSource = pathApi.join(workspace, 'main.rs');
+  const executable = pathApi.join(root, process.platform === 'win32' ? 'probe.exe' : 'probe');
+
+  try {
+    mkdirSync(pathApi.dirname(nestedSource), { recursive: true });
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(nestedSource, 'pub fn source_path() -> &\'static str { file!() }\n');
+    writeFileSync(mainSource, '#[path = ' + JSON.stringify(nestedSource) + ']\nmod registry_source;\nfn main() { print!("{}", registry_source::source_path()); }\n');
+
+    const environment = compilerBuildEnvironment({
+      ...process.env,
+      GITHUB_WORKSPACE: workspace,
+      HOME: home,
+      USERPROFILE: home,
+      CARGO_HOME: cargoHome,
+      RUSTUP_HOME: rustupHome,
+      RUSTFLAGS: '',
+      CARGO_ENCODED_RUSTFLAGS: ''
+    }, process.platform, workspace);
+    const flags = environment.CARGO_ENCODED_RUSTFLAGS.split('\x1f');
+    const compiled = spawnSync('rustc', [mainSource, '--edition=2021', '-o', executable, ...flags], {
+      encoding: 'utf8',
+      env: environment
+    });
+    assert.equal(compiled.status, 0, compiled.stderr || String(compiled.error));
+
+    const output = spawnSync(executable, [], { encoding: 'utf8' });
+    assert.equal(output.status, 0, output.stderr || String(output.error));
+    assert.equal(output.stdout.replaceAll('\\', '/'), '/cargo/registry/source.rs');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('compiler build environment script writes the encoded flags consumed by Cargo', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ck-compiler-env-'));
+  const environmentFile = join(root, 'github-env');
+  const windows = process.platform === 'win32';
+  const home = windows ? 'C:\\agent user' : '/agent user';
+  const workspace = windows ? 'D:\\agent work\\project' : '/agent work/project';
+  const cargoHome = windows ? home + '\\.cargo' : home + '/.cargo';
+  const rustupHome = windows ? home + '\\.rustup' : home + '/.rustup';
+  const script = resolve(dirname(fileURLToPath(import.meta.url)), '../scripts/compilerBuildEnvironment.mjs');
+
+  try {
+    const result = spawnSync(process.execPath, [script], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GITHUB_ENV: environmentFile,
+        GITHUB_WORKSPACE: workspace,
+        HOME: home,
+        USERPROFILE: home,
+        CARGO_HOME: cargoHome,
+        RUSTUP_HOME: rustupHome,
+        RUSTFLAGS: '',
+        CARGO_ENCODED_RUSTFLAGS: ''
+      }
+    });
+    assert.equal(result.status, 0, result.stderr || String(result.error));
+    const line = readFileSync(environmentFile, 'utf8').trimEnd();
+    assert.ok(line.startsWith('CARGO_ENCODED_RUSTFLAGS='));
+    const flags = line.slice('CARGO_ENCODED_RUSTFLAGS='.length).split('\x1f');
+    const pathApi = windows ? win32 : posix;
+    const expectedWorkspace = pathApi.resolve(workspace);
+    const expectedCargo = pathApi.resolve(cargoHome);
+    const expectedRustup = pathApi.resolve(rustupHome);
+    const expectedHome = pathApi.resolve(home);
+    assert.ok(flags.includes('--remap-path-prefix=' + expectedWorkspace + '=/workspace'));
+    assert.ok(flags.includes('--remap-path-prefix=' + expectedCargo + '=/cargo'));
+    assert.ok(flags.includes('--remap-path-prefix=' + expectedRustup + '=/rustup'));
+    assert.ok(flags.includes('--remap-path-prefix=' + expectedHome + '=/home'));
+    if (windows) {
+      assert.ok(flags.includes('-C'));
+      assert.ok(flags.includes('target-feature=+crt-static'));
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('package requires runtime resources and every listed third-party license', () => {
   const notices = readFileSync(new URL('../THIRD_PARTY_NOTICES.md', import.meta.url), 'utf8');
   const files = requiredVsixFiles('ckc', notices);
@@ -167,6 +347,12 @@ test('package requires runtime resources and every listed third-party license', 
   ]) {
     assert.ok(files.includes(path), path + ' must be included in the VSIX');
   }
+});
+
+test('package rejects compiler checkout files from the VSIX member list', () => {
+  assert.equal(validateNoCompilerCheckoutInVsix(['package.json', 'dist/extension.cjs']), undefined);
+  assert.match(validateNoCompilerCheckoutInVsix(['CalcKernel/src/lib.rs']), /compiler checkout/);
+  assert.match(validateNoCompilerCheckoutInVsix(['.\\CalcKernel\\target\\release\\ckc']), /compiler checkout/);
 });
 
 test('notices must exactly match the production dependency licenses', () => {

@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
-const workflow = readFileSync(new URL('../.github/workflows/vscode-extension.yml', import.meta.url), 'utf8');
+const workflow = readFileSync(new URL('../.github/workflows/vscode-extension.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 test('non-publishing workflow dispatch retains its six-platform VSIX artifacts', () => {
   const upload = workflow.match(/      - name: Upload VSIX\n([\s\S]*?)(?=\n\n  release:)/)?.[1];
@@ -22,3 +25,34 @@ test('retaining preview VSIX files does not open release or Marketplace jobs', (
   assert.match(marketplace, /!contains\(github\.ref_name, '-'\)/);
   assert.match(marketplace, /github\.event_name == 'workflow_dispatch' && inputs\.publish_marketplace/);
 });
+
+if (process.env.CK_VSCODE_WORKFLOW_EOL_CHILD !== '1') {
+  test('the workflow contract loads from LF and CRLF checkout layouts', () => {
+    const workflowSource = readFileSync(new URL('../.github/workflows/vscode-extension.yml', import.meta.url), 'utf8')
+      .replace(/\r?\n/g, '\n');
+    const testSource = readFileSync(new URL(import.meta.url), 'utf8');
+
+    for (const newline of ['\n', '\r\n']) {
+      const root = mkdtempSync(join(tmpdir(), 'ck-workflow-eol-'));
+      try {
+        const workflowPath = join(root, '.github', 'workflows', 'vscode-extension.yml');
+        const testPath = join(root, 'test', 'workflowContract.test.mjs');
+        mkdirSync(join(root, '.github', 'workflows'), { recursive: true });
+        mkdirSync(join(root, 'test'), { recursive: true });
+        writeFileSync(workflowPath, workflowSource.replace(/\n/g, newline));
+        writeFileSync(testPath, testSource);
+
+        const childEnvironment = { ...process.env, CK_VSCODE_WORKFLOW_EOL_CHILD: '1' };
+        delete childEnvironment.NODE_TEST_CONTEXT;
+        const result = spawnSync(process.execPath, ['--test', 'test/workflowContract.test.mjs'], {
+          cwd: root,
+          encoding: 'utf8',
+          env: childEnvironment
+        });
+        assert.equal(result.status, 0, result.stderr || result.stdout || String(result.error));
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+}

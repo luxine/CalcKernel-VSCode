@@ -173,6 +173,16 @@ export function requiredVsixFiles(binaryName, notices) {
   ];
 }
 
+export function validateNoCompilerCheckoutInVsix(files) {
+  for (const file of files) {
+    const normalized = String(file).replaceAll('\\', '/').replace(/^\.\//, '');
+    if (normalized === 'CalcKernel' || normalized.startsWith('CalcKernel/')) {
+      return 'VSIX must not include a CalcKernel compiler checkout.';
+    }
+  }
+  return undefined;
+}
+
 export function validateNotices(notices, licenses) {
   const declared = new Map();
   for (const match of notices.matchAll(/^\| ([^|]+) \| ([^|]+) \| ([^|]+) \| \[license\]\(third_party\/licenses\/([^)]+)\) \|$/gm)) {
